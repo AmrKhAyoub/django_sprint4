@@ -1,27 +1,20 @@
-from django.shortcuts import render, get_object_or_404
-from django.utils import timezone
-from .models import Post, Category, User, Comment
-
-# --------------------------------------
-
-from django.contrib.auth.forms import UserCreationForm
-from django.urls import reverse_lazy
-from django.views.generic import CreateView
-
-from django.views.generic import ListView
-
-from django.views.generic import UpdateView
-
-from django.core.paginator import Paginator
-
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect
-from .forms import PostForm, CommentForm
-
+from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.urls import reverse
+from django.core.paginator import Paginator
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.views.generic import (
+    CreateView,
+    DeleteView,
+    ListView,
+    UpdateView
+)
 
-from django.views.generic import DeleteView
+from .forms import CommentForm, PostForm
+from .models import Category, Comment, Post, User
 
 POSTS_PER_PAGE = 10
 
@@ -72,13 +65,14 @@ def category_posts(request, category_slug):
 
 def post_detail(request, id):
     template = 'blog/detail.html'
-    post = get_object_or_404(
-        Post.objects.select_related('category', 'location', 'author'),
-        pk=id,
-        pub_date__lte=timezone.now(),
-        is_published=True,
-        category__is_published=True
-    )
+    post = get_object_or_404(Post, pk=id)
+
+    if post.author != request.user:
+        if not (post.is_published
+                and post.category.is_published
+                and post.pub_date <= timezone.now()):
+            raise Http404
+
     comments = post.comments.select_related('author')
     form = CommentForm()
     context = {
@@ -99,32 +93,24 @@ class ProfileListView(ListView):
     model = Post
     template_name = 'blog/profile.html'
     paginate_by = 10
-    # نحدد اسم الكائن في السياق ليكون page_obj ليتوافق مع قوالب المشروع والتقسيم
     context_object_name = 'page_obj'
 
     def get_queryset(self):
-        # 1. جلب المستخدم صاحب الملف الشخصي أو إرجاع 404 إذا لم يوجد
         self.author = get_object_or_404(User, username=self.kwargs['username'])
-        
-        # 2. إنشاء الاستعلام الأساسي مع تحسين الأداء (select_related) لجلب بيانات القسم والمكان
-        # هذا ضروري لعرض الصور والبيانات المرتبطة بكفاءة
-        queryset = Post.objects.filter(author=self.author).select_related('category', 'location')
-        
-        # 3. منطق المهمة الخامسة:
-        # إذا كان المستخدم المسجل (request.user) ليس هو صاحب الملف الشخصي (self.author)
-        # نقوم بفلترة المنشورات لعرض المنشورة فقط والمنتمية لأقسام منشورة وتاريخها ليس في المستقبل
+
+        queryset = Post.objects.filter(
+            author=self.author).select_related('category', 'location')
+
         if self.request.user != self.author:
             queryset = queryset.filter(
                 pub_date__lte=timezone.now(),
                 is_published=True,
                 category__is_published=True
             )
-       
-        # ترتيب المنشورات من الأحدث للأقدم
+
         return queryset.order_by('-pub_date')
 
     def get_context_data(self, **kwargs):
-        # إضافة بيانات صاحب الملف الشخصي للسياق لعرض اسمه في القالب
         context = super().get_context_data(**kwargs)
         context['profile'] = self.author
         return context
@@ -165,20 +151,17 @@ def post_create(request):
 class PostUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Post
     form_class = PostForm
-    template_name = 'blog/create.html'  # استخدام نفس قالب الإنشاء حسب التعليمات
+    template_name = 'blog/create.html'
 
     def test_func(self):
-        # التحقق من أن المستخدم الحالي هو مؤلف المنشور
         post = self.get_object()
         return self.request.user == post.author
 
     def handle_no_permission(self):
-        # إذا لم يكن المستخدم هو المؤلف، يتم تحويله لصفحة عرض المنشور
         from django.shortcuts import redirect
-        return redirect('blog:post_detail', id=self.kwargs['post_id'])
+        return redirect('blog:post_detail', id=self.kwargs['pk'])
 
     def get_success_url(self):
-        # بعد التعديل الناجح، التوجيه لصفحة المنشور
         return reverse('blog:post_detail', kwargs={'id': self.object.pk})
 
 
@@ -207,35 +190,35 @@ class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         return reverse('blog:post_detail', kwargs={'id': self.object.post.id})
 
 
-# --- حذف المنشورات ---
 class PostDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     model = Post
-    template_name = 'blog/create.html'  # إعادة استخدام قالب الإنشاء حسب المتطلبات
+    template_name = 'blog/create.html'
 
     def test_func(self):
-        # التأكد من أن المستخدم هو صاحب المنشور
         return self.get_object().author == self.request.user
 
     def get_success_url(self):
-        # بعد الحذف، التوجيه لملف المستخدم الشخصي
-        return reverse_lazy('blog:profile', kwargs={'username': self.request.user.username})
+        return reverse_lazy(
+            'blog:profile',
+            kwargs={
+                'username': self.request.user.username
+            }
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # إرسال بيانات المنشور للقالب لعرضه في صفحة التأكيد
-        context['is_edit'] = False # لإخبار القالب أننا في وضع الحذف/التأكيد
+        context['is_edit'] = False
         return context
 
 
-# --- حذف التعليقات ---
 class CommentDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     model = Comment
-    template_name = 'blog/comment.html'  # إعادة استخدام قالب التعليقات
+    template_name = 'blog/comment.html'
 
     def test_func(self):
-        # التأكد من أن المستخدم هو صاحب التعليق
         return self.get_object().author == self.request.user
 
     def get_success_url(self):
-        # بعد الحذف، العودة لصفحة المنشور
-        return reverse_lazy('blog:post_detail', kwargs={'id': self.object.post.id})
+        return reverse_lazy(
+            'blog:post_detail',
+            kwargs={'id': self.object.post.id})

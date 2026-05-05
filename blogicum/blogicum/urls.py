@@ -16,14 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-# from pages import views
+from blog.views import SignUp
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('blog.urls')),
     path('pages/', include('pages.urls')),
     path('auth/', include('django.contrib.auth.urls')),
-    path('auth/registration/', include('blog.urls')),
+    path('auth/registration/', SignUp.as_view(), name='registration'),
 ]
 
 handler404 = 'pages.views.page_not_found'
