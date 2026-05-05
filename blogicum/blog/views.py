@@ -1,6 +1,6 @@
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
-from .models import Post, Category, User
+from .models import Post, Category, User, Comment
 
 # --------------------------------------
 
@@ -16,7 +16,7 @@ from django.core.paginator import Paginator
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
-from .forms import PostForm
+from .forms import PostForm , CommentForm
 
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.urls import reverse
@@ -78,7 +78,13 @@ def post_detail(request, id):
         is_published=True,
         category__is_published=True
     )
-    context = {'post': post}
+    comments = post.comments.select_related('author')
+    form = CommentForm()
+    context = {
+        'post': post,
+        'form': form,
+        'comments': comments,
+    }
     return render(request, template, context)
 
 
@@ -173,3 +179,28 @@ class PostUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     def get_success_url(self):
         # بعد التعديل الناجح، التوجيه لصفحة المنشور
         return reverse('blog:post_detail', kwargs={'id': self.object.pk})
+
+
+@login_required
+def add_comment(request, post_id):
+    post = get_object_or_404(Post, pk=post_id)
+    form = CommentForm(request.POST)
+    if form.is_valid():
+        comment = form.save(commit=False)
+        comment.author = request.user
+        comment.post = post
+        comment.save()
+    return redirect('blog:post_detail', id=post_id)
+
+
+class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    model = Comment
+    form_class = CommentForm
+    template_name = 'blog/comment.html'
+
+    def test_func(self):
+        comment = self.get_object()
+        return self.request.user == comment.author
+
+    def get_success_url(self):
+        return reverse('blog:post_detail', kwargs={'id': self.object.post.id})
