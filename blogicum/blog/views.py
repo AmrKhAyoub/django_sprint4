@@ -1,6 +1,16 @@
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
-from .models import Post, Category
+
+from django.contrib.auth.forms import UserCreationForm
+from django.urls import reverse_lazy
+from django.views.generic import CreateView
+
+from django.views.generic import ListView
+
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.views.generic import UpdateView
+
+from .models import Post, Category, User
 
 
 def index(request):
@@ -48,3 +58,42 @@ def post_detail(request, id):
     )
     context = {'post': post}
     return render(request, template, context)
+
+
+class SignUp(CreateView):
+    form_class = UserCreationForm
+    success_url = reverse_lazy('blog:index')
+    template_name = 'registration/registration_form.html'
+
+
+class ProfileListView(ListView):
+    model = Post
+    template_name = 'blog/profile.html'
+    paginate_by = 10
+
+    def get_queryset(self):
+        self.author = get_object_or_404(User, username=self.kwargs['username'])
+        return Post.objects.filter(author=self.author)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['profile'] = self.author
+        return context
+
+
+class ProfileUpdateView(LoginRequiredMixin, UpdateView):
+    model = User
+    fields = ['first_name', 'last_name', 'username', 'email']
+    template_name = 'blog/user.html'
+
+    def get_object(self):
+        # لضمان أن المستخدم يعدل حسابه هو فقط وليس حساباً آخر
+        return self.request.user
+
+    def get_success_url(self):
+        return reverse_lazy(
+            'blog:profile',
+            kwargs={
+                'username': self.request.user.username
+            }
+        )
