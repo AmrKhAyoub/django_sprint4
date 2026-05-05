@@ -16,11 +16,12 @@ from django.core.paginator import Paginator
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
-from .forms import PostForm , CommentForm
+from .forms import PostForm, CommentForm
 
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.urls import reverse
 
+from django.views.generic import DeleteView
 
 POSTS_PER_PAGE = 10
 
@@ -204,3 +205,37 @@ class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
     def get_success_url(self):
         return reverse('blog:post_detail', kwargs={'id': self.object.post.id})
+
+
+# --- حذف المنشورات ---
+class PostDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
+    model = Post
+    template_name = 'blog/create.html'  # إعادة استخدام قالب الإنشاء حسب المتطلبات
+
+    def test_func(self):
+        # التأكد من أن المستخدم هو صاحب المنشور
+        return self.get_object().author == self.request.user
+
+    def get_success_url(self):
+        # بعد الحذف، التوجيه لملف المستخدم الشخصي
+        return reverse_lazy('blog:profile', kwargs={'username': self.request.user.username})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # إرسال بيانات المنشور للقالب لعرضه في صفحة التأكيد
+        context['is_edit'] = False # لإخبار القالب أننا في وضع الحذف/التأكيد
+        return context
+
+
+# --- حذف التعليقات ---
+class CommentDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
+    model = Comment
+    template_name = 'blog/comment.html'  # إعادة استخدام قالب التعليقات
+
+    def test_func(self):
+        # التأكد من أن المستخدم هو صاحب التعليق
+        return self.get_object().author == self.request.user
+
+    def get_success_url(self):
+        # بعد الحذف، العودة لصفحة المنشور
+        return reverse_lazy('blog:post_detail', kwargs={'id': self.object.post.id})
