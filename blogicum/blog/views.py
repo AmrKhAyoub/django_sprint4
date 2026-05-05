@@ -1,5 +1,8 @@
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
+from .models import Post, Category, User
+
+# --------------------------------------
 
 from django.contrib.auth.forms import UserCreationForm
 from django.urls import reverse_lazy
@@ -10,7 +13,9 @@ from django.views.generic import ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import UpdateView
 
-from .models import Post, Category, User
+from django.core.paginator import Paginator
+
+POSTS_PER_PAGE = 10
 
 
 def index(request):
@@ -24,8 +29,13 @@ def index(request):
         pub_date__lte=now,
         is_published=True,
         category__is_published=True
-    ).order_by('-pub_date')[:5]
-    context = {'post_list': post_list}
+    ).order_by('-pub_date')
+
+    paginator = Paginator(post_list, POSTS_PER_PAGE)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {'page_obj': page_obj}
     return render(request, template, context)
 
 
@@ -40,9 +50,14 @@ def category_posts(request, category_slug):
         pub_date__lte=timezone.now(),
         is_published=True
     ).order_by('-pub_date')
+
+    paginator = Paginator(post_list, POSTS_PER_PAGE)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
     context = {
         'category': category,
-        'post_list': post_list,
+        'page_obj': page_obj,
     }
     return render(request, template, context)
 
@@ -87,7 +102,6 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
     template_name = 'blog/user.html'
 
     def get_object(self):
-        # لضمان أن المستخدم يعدل حسابه هو فقط وليس حساباً آخر
         return self.request.user
 
     def get_success_url(self):
