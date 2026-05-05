@@ -10,10 +10,17 @@ from django.views.generic import CreateView
 
 from django.views.generic import ListView
 
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import UpdateView
 
 from django.core.paginator import Paginator
+
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect
+from .forms import PostForm
+
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.urls import reverse
+
 
 POSTS_PER_PAGE = 10
 
@@ -85,12 +92,32 @@ class ProfileListView(ListView):
     model = Post
     template_name = 'blog/profile.html'
     paginate_by = 10
+    # نحدد اسم الكائن في السياق ليكون page_obj ليتوافق مع قوالب المشروع والتقسيم
+    context_object_name = 'page_obj'
 
     def get_queryset(self):
+        # 1. جلب المستخدم صاحب الملف الشخصي أو إرجاع 404 إذا لم يوجد
         self.author = get_object_or_404(User, username=self.kwargs['username'])
-        return Post.objects.filter(author=self.author)
+        
+        # 2. إنشاء الاستعلام الأساسي مع تحسين الأداء (select_related) لجلب بيانات القسم والمكان
+        # هذا ضروري لعرض الصور والبيانات المرتبطة بكفاءة
+        queryset = Post.objects.filter(author=self.author).select_related('category', 'location')
+        
+        # 3. منطق المهمة الخامسة:
+        # إذا كان المستخدم المسجل (request.user) ليس هو صاحب الملف الشخصي (self.author)
+        # نقوم بفلترة المنشورات لعرض المنشورة فقط والمنتمية لأقسام منشورة وتاريخها ليس في المستقبل
+        if self.request.user != self.author:
+            queryset = queryset.filter(
+                pub_date__lte=timezone.now(),
+                is_published=True,
+                category__is_published=True
+            )
+       
+        # ترتيب المنشورات من الأحدث للأقدم
+        return queryset.order_by('-pub_date')
 
     def get_context_data(self, **kwargs):
+        # إضافة بيانات صاحب الملف الشخصي للسياق لعرض اسمه في القالب
         context = super().get_context_data(**kwargs)
         context['profile'] = self.author
         return context
@@ -111,3 +138,38 @@ class ProfileUpdateView(LoginRequiredMixin, UpdateView):
                 'username': self.request.user.username
             }
         )
+
+
+@login_required
+def post_create(request):
+    template = 'blog/create.html'
+    form = PostForm(request.POST or None, files=request.FILES or None)
+
+    if form.is_valid():
+        post = form.save(commit=False)
+        post.author = request.user
+        post.save()
+        return redirect('blog:profile', username=request.user.username)
+
+    context = {'form': form}
+    return render(request, template, context)
+
+
+class PostUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    model = Post
+    form_class = PostForm
+    template_name = 'blog/create.html'  # استخدام نفس قالب الإنشاء حسب التعليمات
+
+    def test_func(self):
+        # التحقق من أن المستخدم الحالي هو مؤلف المنشور
+        post = self.get_object()
+        return self.request.user == post.author
+
+    def handle_no_permission(self):
+        # إذا لم يكن المستخدم هو المؤلف، يتم تحويله لصفحة عرض المنشور
+        from django.shortcuts import redirect
+        return redirect('blog:post_detail', id=self.kwargs['post_id'])
+
+    def get_success_url(self):
+        # بعد التعديل الناجح، التوجيه لصفحة المنشور
+        return reverse('blog:post_detail', kwargs={'id': self.object.pk})
