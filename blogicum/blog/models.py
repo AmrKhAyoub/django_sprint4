@@ -74,13 +74,17 @@ class Post(PublishedModel):
         related_name='posts',
         verbose_name='Местоположение'
     )
-    # أضف null=True هنا بناءً على فشل الاختبار params5
     category = models.ForeignKey(
         Category,
         on_delete=models.CASCADE,
         null=True,
         related_name='posts',
         verbose_name='Категория'
+    )
+    image = models.ImageField(
+        upload_to='posts_images/',
+        blank=True,
+        verbose_name='Изображение'
     )
 
     class Meta:
