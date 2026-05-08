@@ -15,18 +15,25 @@ from .models import Category, Comment, Post, User
 POSTS_PER_PAGE = 10
 
 
+# Helper function to count number of comments
+def annotate_comment_count(queryset):
+    return queryset.annotate(comment_count=Count('comments'))
+
+
 def get_published_posts(queryset=None):
     if queryset is None:
         queryset = Post.objects.all()
-    return queryset.select_related(
-        'category', 'location', 'author'
+    queryset = queryset.select_related(
+        'category',
+        'location',
+        'author'
     ).filter(
         pub_date__lte=timezone.now(),
         is_published=True,
         category__is_published=True
-    ).annotate(
-        comment_count=Count('comments')
-    ).order_by('-pub_date')
+    )
+    # using the helper function to count comments
+    return annotate_comment_count(queryset).order_by('-pub_date')
 
 
 def get_pagination(request, queryset):
@@ -76,11 +83,19 @@ class ProfileListView(ListView):
 
     def get_queryset(self):
         self.author = get_object_or_404(User, username=self.kwargs['username'])
-        return self.author.posts.select_related(
+        queryset = self.author.posts.select_related(
             'category', 'location', 'author'
-        ).annotate(
-            comment_count=Count('comments')
-        ).order_by('-pub_date')
+        )
+        # check if its not the user who is viewing his own profile
+        # then show only the published view
+        if self.request.user != self.author:
+            queryset = queryset.filter(
+                pub_date__lte=timezone.now(),
+                is_published=True,
+                category__is_published=True
+            )
+        # using the helper function to count comments
+        return annotate_comment_count(queryset).order_by('-pub_date')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
